@@ -7,7 +7,7 @@ use PhpParser\NodeDumper;
 use PhpParser\ParserFactory;
 use PhpParser\Node\Expr;
 
-
+//use RuntimeException;
 use PhpParser\Node\Stmt\Expression;
 
 use PhpParser\Node\Expr\BinaryOp\Plus;
@@ -18,6 +18,7 @@ use PhpParser\Node\Expr\BinaryOp\Div;
 
 use PhpParser\Node\Expr\Variable;
 use PhpParser\Node\Scalar\LNumber;
+use PhpParser\Node\Scalar\DNumber;
 use PhpParser\Node\Expr\FuncCall;
 use PhpParser\Node\Name;
 use PhpParser\Node\Expr\UnaryMinus;
@@ -25,7 +26,7 @@ use PhpParser\Node\Expr\UnaryPlus;
 
 $code = <<<'CODE'
 <?php
-$x ** 4 + cos($x) * $x + tan($x);
+6 * $x + 19 * $x + 4 + 23;
 
 CODE;
 
@@ -38,61 +39,69 @@ try {
 }
 
 $dumper = new NodeDumper;
-echo $dumper->dump($ast) . "\n";
+//echo $dumper->dump($ast) . "\n";
 
 $output = null;
 $expr = $ast[0];
-print_r($expr);
-print_r($output = differentiate($expr));
+//print_r($expr);
+print_r($output = differentiate($expr), true);
 
 function differentiate($inputExpr, string $diffVar = 'x')
 {
     if (!is_object($inputExpr)) {
-        return null;
+        throw new RuntimeException("Expression cannot be differentiated");
     }
 
-    switch(get_class($inputExpr)) {
+    switch($inputExprClass = get_class($inputExpr)) {
         case Expression::class:
-            return new Expression(differentiate($inputExpr->expr));
+            $outputExpr = new Expression(differentiate($inputExpr->expr));
+            break;
         case Plus::class:
-            return new Plus(
+            $outputExpr = new Plus(
                 differentiate($inputExpr->left),
                 differentiate($inputExpr->right)
             );
-        case Plus::class:
-            return new Plus(
+            break;
+        case Minus::class:
+            $outputExpr = new Minus(
                 differentiate($inputExpr->left),
                 differentiate($inputExpr->right)
             );
+            break;
         case Mul::class:
-            return new Plus(
-                new Mul(differentiate($inputExpr->left), clone $inputExpr->right),
-                new Mul(clone $inputExpr->left, differentiate($inputExpr->right))
+            $outputExpr = new Plus(
+                simplify(new Mul(differentiate($inputExpr->left), clone $inputExpr->right)),
+                simplify(new Mul(clone $inputExpr->left, differentiate($inputExpr->right)))
             );
+            break;
         case Div::class:
-            return new Div(
+            $outputExpr = new Div(
                 new Minus(
-                        new Mul(differentiate($inputExpr->left), clone $inputExpr->right),
-                        new Mul(clone $inputExpr->left, differentiate($inputExpr->right))
+                        simplify(new Mul(differentiate($inputExpr->left), clone $inputExpr->right)),
+                        simplify(new Mul(clone $inputExpr->left, differentiate($inputExpr->right)))
                     ),
                 new Pow(clone $inputExpr->right, new LNumber(2))
             );
+            break;
         case Pow::class:
-            return new Mul(
+            $outputExpr = simplify(new Mul(
                 $inputExpr->right,
                 new Pow(
                     $inputExpr->left,
                     new Minus($inputExpr->right, new LNumber(1))
                 )
-            );
+            ));
+            break;
         case Variable::class:
             if ($inputExpr->name === $diffVar) {
-                return new LNumber(1);
+                $outputExpr = new LNumber(1);
             } else {
-                return new LNumber(0);
+                $outputExpr = new LNumber(0);
             }
+            break;
         case LNumber::class:
-            return new LNumber(0);
+            $outputExpr = new LNumber(0);
+            break;
         case FuncCall::class:
             /** @var FuncCall $name */
             $name = $inputExpr->name;
@@ -118,16 +127,72 @@ function differentiate($inputExpr, string $diffVar = 'x')
                         break;
                 }
 
-                return new Mul($functionDerivative, differentiate($argument->value));
+                $outputExpr = new Mul($functionDerivative, differentiate($argument->value));
             }
+            break;
         case UnaryMinus::class:
-            return new UnaryMinus(differentiate($inputExpr->expr));
+            $outputExpr = new UnaryMinus(differentiate($inputExpr->expr));
+            break;
         case UnaryPlus::class:
-            return differentiate($inputExpr->expr);
+            $outputExpr = differentiate($inputExpr->expr);
+            break;
+        default:
+            throw new RuntimeException("Object of $inputExprClass cannot be differentiated");
     }
 
-    return null;
+    return simplify($outputExpr);
 }
+
+function simplify($inputExpr)
+{
+    switch(get_class($inputExpr)) {
+        case Plus::class:
+            if (isZero($inputExpr->left)) {
+                return clone $inputExpr->right;
+            } elseif (isZero($inputExpr->right)) {
+                return clone $inputExpr->left;
+            } elseif (isInteger($inputExpr->left) && isInteger($inputExpr->right)) {
+                return new LNumber($inputExpr->left->value + $inputExpr->right->value);
+            }
+        case Mul::class:
+            if (isZero($inputExpr->left) || isZero($inputExpr->right)) {
+                return new LNumber(0);
+            } elseif (isUnity($inputExpr->left)) {
+                return clone $inputExpr->right;
+            } elseif (isUnity($inputExpr->right)) {
+                return clone $inputExpr->left;
+            } elseif (isInteger($inputExpr->left) && isInteger($inputExpr->right)) {
+                return new LNumber($inputExpr->left->value * $inputExpr->right->value);
+            }
+            
+    }
+    
+    return $inputExpr;
+}
+
+function isZero($inputExpr)
+{
+    $type = get_class($inputExpr);
+    return ($type === Lnumber::class || $type === DNumber::class) &&
+           empty($inputExpr->value);
+}
+
+function isUnity($inputExpr)
+{
+    $type = get_class($inputExpr);
+    if ($type === Lnumber::class ) {
+        print_r("integer  " . $inputExpr->value. " ". gettype($inputExpr->value));
+        
+    }
+    return  $type === Lnumber::class && $inputExpr->value === 1 ||
+            $type === DNumber::class && (float)$inputExpr->value === 1.0;
+}
+
+function isInteger($inputExpr)
+{
+    return get_class($inputExpr) === Lnumber::class;
+}
+
 
 echo "\n";
 use PhpParser\PrettyPrinter;
