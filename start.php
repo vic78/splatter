@@ -180,10 +180,6 @@ function isZero($inputExpr)
 function isUnity($inputExpr)
 {
     $type = get_class($inputExpr);
-    if ($type === Lnumber::class ) {
-        print_r("integer  " . $inputExpr->value. " ". gettype($inputExpr->value));
-        
-    }
     return  $type === Lnumber::class && $inputExpr->value === 1 ||
             $type === DNumber::class && (float)$inputExpr->value === 1.0;
 }
