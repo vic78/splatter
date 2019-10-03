@@ -1,0 +1,6 @@
+{
+    "name": "vic78/splatter",
+    "require": {
+        "nikic/php-parser": "^4.2"
+    }
+}
