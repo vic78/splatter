@@ -26,7 +26,7 @@ use PhpParser\Node\Expr\UnaryPlus;
 
 $code = <<<'CODE'
 <?php
-6 * $x + 19 * $x + 4 + 23;
+exp(2* $x ** 4) + 17 * $x ** 12;
 
 CODE;
 
@@ -44,7 +44,7 @@ $dumper = new NodeDumper;
 $output = null;
 $expr = $ast[0];
 //print_r($expr);
-print_r($output = differentiate($expr), true);
+print_r($output = simplify(differentiate($expr)), true);
 
 function differentiate($inputExpr, string $diffVar = 'x')
 {
@@ -53,55 +53,51 @@ function differentiate($inputExpr, string $diffVar = 'x')
     }
 
     switch($inputExprClass = get_class($inputExpr)) {
+
         case Expression::class:
-            $outputExpr = new Expression(differentiate($inputExpr->expr));
-            break;
+            return new Expression(differentiate($inputExpr->expr));
         case Plus::class:
-            $outputExpr = new Plus(
+            return new Plus(
                 differentiate($inputExpr->left),
                 differentiate($inputExpr->right)
             );
-            break;
         case Minus::class:
-            $outputExpr = new Minus(
+            return new Minus(
                 differentiate($inputExpr->left),
                 differentiate($inputExpr->right)
             );
-            break;
         case Mul::class:
-            $outputExpr = new Plus(
-                simplify(new Mul(differentiate($inputExpr->left), clone $inputExpr->right)),
-                simplify(new Mul(clone $inputExpr->left, differentiate($inputExpr->right)))
+            return new Plus(
+                new Mul(differentiate($inputExpr->left), clone $inputExpr->right),
+                new Mul(clone $inputExpr->left, differentiate($inputExpr->right))
             );
-            break;
         case Div::class:
-            $outputExpr = new Div(
+            return new Div(
                 new Minus(
-                        simplify(new Mul(differentiate($inputExpr->left), clone $inputExpr->right)),
-                        simplify(new Mul(clone $inputExpr->left, differentiate($inputExpr->right)))
+                        new Mul(differentiate($inputExpr->left), clone $inputExpr->right),
+                        new Mul(clone $inputExpr->left, differentiate($inputExpr->right))
                     ),
                 new Pow(clone $inputExpr->right, new LNumber(2))
             );
-            break;
         case Pow::class:
-            $outputExpr = simplify(new Mul(
-                $inputExpr->right,
-                new Pow(
-                    $inputExpr->left,
-                    new Minus($inputExpr->right, new LNumber(1))
-                )
-            ));
-            break;
+            return new Mul(
+                new Mul(
+                    $inputExpr->right,
+                    new Pow(
+                        $inputExpr->left,
+                        new Minus($inputExpr->right, new LNumber(1))
+                    ),
+                ),
+                differentiate($inputExpr->left)
+            );
         case Variable::class:
             if ($inputExpr->name === $diffVar) {
-                $outputExpr = new LNumber(1);
+                return new LNumber(1);
             } else {
-                $outputExpr = new LNumber(0);
+                return new LNumber(0);
             }
-            break;
         case LNumber::class:
-            $outputExpr = new LNumber(0);
-            break;
+            return new LNumber(0);
         case FuncCall::class:
             /** @var FuncCall $name */
             $name = $inputExpr->name;
@@ -125,48 +121,118 @@ function differentiate($inputExpr, string $diffVar = 'x')
                             )
                         );
                         break;
+                    case 'exp':
+                        return new Mul(
+                            new FuncCall(new Name('exp'), [$argument]),
+                            differentiate($argument->value)
+                        );
                 }
 
-                $outputExpr = new Mul($functionDerivative, differentiate($argument->value));
+                return new Mul($functionDerivative, differentiate($argument->value));
             }
-            break;
         case UnaryMinus::class:
-            $outputExpr = new UnaryMinus(differentiate($inputExpr->expr));
-            break;
+            return new UnaryMinus(differentiate($inputExpr->expr));
         case UnaryPlus::class:
-            $outputExpr = differentiate($inputExpr->expr);
-            break;
+            return differentiate($inputExpr->expr);
         default:
             throw new RuntimeException("Object of $inputExprClass cannot be differentiated");
     }
-
-    return simplify($outputExpr);
 }
 
 function simplify($inputExpr)
 {
-    switch(get_class($inputExpr)) {
+    $inputExprClass = get_class($inputExpr);
+
+    switch ($inputExprClass) {
+
+        case Expression::class:
+        case UnaryPlus::class:
+        case UnaryMinus::class:
+            $expr = simplify($inputExpr->expr);
+            break;
         case Plus::class:
-            if (isZero($inputExpr->left)) {
-                return clone $inputExpr->right;
-            } elseif (isZero($inputExpr->right)) {
-                return clone $inputExpr->left;
-            } elseif (isInteger($inputExpr->left) && isInteger($inputExpr->right)) {
-                return new LNumber($inputExpr->left->value + $inputExpr->right->value);
+        case Minus::class:
+        case Mul::class:
+        case Div::class:
+        case Pow::class:
+            $left  = simplify($inputExpr->left);
+            $right = simplify($inputExpr->right);
+            break;
+    }
+
+    switch ($inputExprClass) {
+
+        case Expression::class:
+            return new Expression($expr);
+        case Plus::class:
+            if (isZero($left)) {
+                return clone $right;
+            } elseif (isZero($right)) {
+                return clone $left;
+            } elseif (isInteger($left) && isInteger($right)) {
+                return new LNumber($left->value + $right->value);
+            } else {
+                return new Plus($left, $right);
             }
         case Mul::class:
-            if (isZero($inputExpr->left) || isZero($inputExpr->right)) {
+            if (isZero($left) || isZero($right)) {
                 return new LNumber(0);
-            } elseif (isUnity($inputExpr->left)) {
-                return clone $inputExpr->right;
-            } elseif (isUnity($inputExpr->right)) {
-                return clone $inputExpr->left;
-            } elseif (isInteger($inputExpr->left) && isInteger($inputExpr->right)) {
-                return new LNumber($inputExpr->left->value * $inputExpr->right->value);
+            } elseif (isUnity($left)) {
+                return clone $right;
+            } elseif (isUnity($right)) {
+                return clone $left;
+            } elseif (isInteger($left) && isInteger($right)) {
+                return new LNumber($left->value * $right->value);
+            } else {
+                return new Mul($left, $right);
             }
-            
+        case Div::class:
+            if (isZero($right)) {
+                throw new RuntimeException('Division by zero');
+            } elseif (isZero($left)) {
+                return new LNumber(0);
+            } elseif (isUnity($right)) {
+                return clone $left;
+            } elseif (  isInteger($left) &&
+                        isInteger($right) &&
+                        $left % $right === 0) {
+                return new LNumber($left->value / $right->value);
+            } else {
+                return new Div($left, $right);
+            }
+        case Minus::class:
+            if (isZero($left)) {
+                return new UnaryMinus($right);
+            } elseif (isZero($right)) {
+                return clone $left;
+            } elseif (isInteger($left) && isInteger($right)) {
+                return new LNumber($left->value - $right->value);
+            } else {
+                return new Minus($left, $right);
+            }
+        case Pow::class:
+            if (isZero($left)) {
+                return new LNumber(0);
+            } elseif (isUnity($left) || isZero($right)) {
+                return new LNumber(1);
+            } elseif ($left instanceof Pow) {
+                $innerLeft = $left->left;
+                $innerRight = $left->right;
+                return new Pow($innerLeft, simplify(new Mul($innerRight, $right)));
+            } else {
+                return new Pow($left, $right);
+            }
+
+        case UnaryPlus::class:
+            return $expr;
+        case UnaryMinus::class:
+            if ($expr instanceof UnaryMinus) {
+                return clone $expr->expr;
+            } else {
+                return $inputExpr;
+            }
     }
-    
+
     return $inputExpr;
 }
 
