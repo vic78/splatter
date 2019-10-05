@@ -20,6 +20,7 @@ use PhpParser\Node\Expr\Variable;
 use PhpParser\Node\Scalar\LNumber;
 use PhpParser\Node\Scalar\DNumber;
 use PhpParser\Node\Expr\FuncCall;
+use PhpParser\Node\Arg;
 use PhpParser\Node\Name;
 use PhpParser\Node\Expr\UnaryMinus;
 use PhpParser\Node\Expr\UnaryPlus;
@@ -106,11 +107,130 @@ function differentiate($inputExpr, string $diffVar = 'x')
                 $argument = clone $inputExpr->args[0];
                 $functionName = $name->getFirst();
                 switch ($functionName) {
-                    case 'sin':
-                        $functionDerivative = new FuncCall(new Name('cos'), [$argument]);
+                    case 'acos':
+                        $functionDerivative = new UnaryMinus(
+                            new Div(
+                                new LNumber(1),
+                                new FuncCall(new Name('sqrt'), [
+                                    new Minus(
+                                        new LNumber(1),
+                                        new Pow(
+                                            clone $argument->value,
+                                            new LNumber(2)
+                                        )
+                                    )
+                                ])
+                            )
+                        );
+                        break;
+                    case 'acosh':
+                        $functionDerivative = new Div(
+                            new LNumber(1),
+                            new FuncCall(new Name('sqrt'), [
+                                new Minus(
+                                    new Pow(
+                                        clone $argument->value,
+                                        new LNumber(2)
+                                    ),
+                                    new LNumber(1)
+                                )
+                            ])
+                        );
+                        break;
+                    case 'asin':
+                        $functionDerivative = new Div(
+                            new LNumber(1),
+                            new FuncCall(new Name('sqrt'), [
+                                new Minus(
+                                    new LNumber(1),
+                                    new Pow(
+                                        clone $argument->value,
+                                        new LNumber(2)
+                                    )
+                                )
+                            ])
+                        );
+                        break;
+                    case 'asinh':
+                        $functionDerivative = new Div(
+                            new LNumber(1),
+                            new FuncCall(new Name('sqrt'), [
+                                new Plus(
+                                    new Pow(
+                                        clone $argument->value,
+                                        new LNumber(2)
+                                    ),
+                                    new LNumber(1)
+                                )
+                            ])
+                        );
+                        break;
+                    case 'atan':
+                        $functionDerivative = new Div(
+                            new LNumber(1),
+                            new Plus(
+                                new LNumber(1),
+                                new Pow(
+                                    clone $argument->value,
+                                    new LNumber(2)
+                                )
+                            )
+                        );
+                        break;
+                    case 'atanh':
+                        $functionDerivative = new Div(
+                            new LNumber(1),
+                            new Minus(
+                                new LNumber(1),
+                                new Pow(
+                                    clone $argument->value,
+                                    new LNumber(2)
+                                )
+                            )
+                        );
                         break;
                     case 'cos':
                         $functionDerivative = new UnaryMinus(new FuncCall(new Name('sin'), [$argument]));
+                        break;
+                    case 'cosh':
+                        $functionDerivative = new FuncCall(new Name('sinh'), [$argument]);
+                        break;
+                    case 'exp':
+                    case 'expm1':
+                        $functionDerivative = new FuncCall(new Name('exp'), [$argument]);
+                        break;
+                    case 'log10':
+                        $functionDerivative = new Div(
+                            new LNumber(1),
+                            new Mul(
+                                clone $argument->value,
+                                new FuncCall(new Name('log'), [new Arg(new LNumber(10))])
+                            )
+                        );
+                        break;
+                    case 'log1p':
+                        $functionDerivative = new Div(
+                            new LNumber(1),
+                            new Plus(
+                                new LNumber(1),
+                                clone $argument->value,
+                            )
+                        );
+                        break;
+                    case 'sin':
+                        $functionDerivative = new FuncCall(new Name('cos'), [$argument]);
+                        break;
+                    case 'sinh':
+                        $functionDerivative = new FuncCall(new Name('cosh'), [$argument]);
+                        break;
+                    case 'sqrt':
+                        $functionDerivative = new Div(
+                            new LNumber(1),
+                            new Mul(
+                                new LNumber(2),
+                                new FuncCall(new Name('sqrt'), [$argument]),
+                            )
+                        );
                         break;
                     case 'tan':
                         $functionDerivative = new Div(
@@ -121,11 +241,15 @@ function differentiate($inputExpr, string $diffVar = 'x')
                             )
                         );
                         break;
-                    case 'exp':
-                        return new Mul(
-                            new FuncCall(new Name('exp'), [$argument]),
-                            differentiate($argument->value)
+                    case 'tanh':
+                        $functionDerivative = new Div(
+                            new LNumber(1),
+                            new Pow(
+                                new FuncCall(new Name('cosh'), [$argument]),
+                                new LNumber(2)
+                            )
                         );
+                        break;
                 }
 
                 return new Mul($functionDerivative, differentiate($argument->value));
