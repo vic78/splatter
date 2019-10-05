@@ -26,7 +26,7 @@ use PhpParser\Node\Expr\UnaryPlus;
 
 $code = <<<'CODE'
 <?php
-exp(2* $x ** 4) + 17 * $x ** 12;
+log($x ** 4) + exp(sin($x));
 
 CODE;
 
@@ -122,10 +122,10 @@ function differentiate($inputExpr, string $diffVar = 'x')
                         );
                         break;
                     case 'exp':
-                        return new Mul(
-                            new FuncCall(new Name('exp'), [$argument]),
-                            differentiate($argument->value)
-                        );
+                        $functionDerivative = new FuncCall(new Name('exp'), [$argument]);
+                        break;
+                    case 'log':
+                        $functionDerivative = new Div(new LNumber(1), $argument->value);
                 }
 
                 return new Mul($functionDerivative, differentiate($argument->value));
