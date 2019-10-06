@@ -27,6 +27,7 @@ use PhpParser\Node\Expr\UnaryPlus;
 
 $code = <<<'CODE'
 <?php
+pow(2 ** 2, 4) * $x;
 log($x ** 4) + exp(sin($x));
 
 CODE;
@@ -81,15 +82,27 @@ function differentiate($inputExpr, string $diffVar = 'x')
                 new Pow(clone $inputExpr->right, new LNumber(2))
             );
         case Pow::class:
-            return new Mul(
+            return new Plus(
                 new Mul(
-                    $inputExpr->right,
-                    new Pow(
-                        $inputExpr->left,
-                        new Minus($inputExpr->right, new LNumber(1))
+                    new Mul(
+                        clone $inputExpr->right,
+                        new Pow(
+                            clone $inputExpr->left,
+                            new Minus(
+                                clone $inputExpr->right,
+                                new LNumber(1)
+                            )
+                        )
                     ),
+                    differentiate($inputExpr->left)
                 ),
-                differentiate($inputExpr->left)
+                new Mul(
+                    new Mul(
+                        clone $inputExpr,
+                        new FuncCall(new Name('log'), [new Arg(clone $inputExpr->left)])
+                    ),
+                    differentiate($inputExpr->right)
+                )
             );
         case Variable::class:
             if ($inputExpr->name === $diffVar) {
@@ -98,6 +111,7 @@ function differentiate($inputExpr, string $diffVar = 'x')
                 return new LNumber(0);
             }
         case LNumber::class:
+        case DNumber::class:
             return new LNumber(0);
         case FuncCall::class:
             /** @var FuncCall $name */
@@ -220,6 +234,37 @@ function differentiate($inputExpr, string $diffVar = 'x')
                     case 'log':
                         $functionDerivative = new Div(new LNumber(1), $argument->value);
                         break;
+                    case 'pi':
+                        $functionDerivative = new LNumber(0);
+                        break;
+                    case 'pow':
+                        if (isset($inputExpr->args[1])) {
+                            $secondArgument = clone $inputExpr->args[1];
+                        } else {
+                            throw RuntimeException('pow() function expects two parameters.');
+                        }
+                        return new Plus(
+                            new Mul(
+                                new Mul(
+                                    clone $secondArgument->value,
+                                    new FuncCall(new Name('pow'), [
+                                        $argument,
+                                        new Arg(new Minus(
+                                            clone $secondArgument->value,
+                                            new LNumber(1)
+                                        ))])
+                                ),
+                                differentiate($argument->value)
+                            ),
+                            new Mul(
+                                new Mul(
+                                    clone $inputExpr,
+                                    new FuncCall(new Name('log'), [$argument])
+                                ),
+                                differentiate($secondArgument->value)
+                            )
+                        );
+                        break;
                     case 'sin':
                         $functionDerivative = new FuncCall(new Name('cos'), [$argument]);
                         break;
@@ -285,6 +330,12 @@ function simplify($inputExpr)
             $left  = simplify($inputExpr->left);
             $right = simplify($inputExpr->right);
             break;
+        case FuncCall::class:
+            $name = $inputExpr->name->getFirst();
+            $arguments = [];
+            foreach ($inputExpr->args as $index => $arg) {
+                $arguments[$index] = new Arg(simplify($arg->value));
+            }
     }
 
     switch ($inputExprClass) {
@@ -338,13 +389,26 @@ function simplify($inputExpr)
                 return new Minus($left, $right);
             }
         case Pow::class:
-            if (isZero($left)) {
+            if (!isZero($left) && isZero($right)) {
+                return new LNumber(1);
+            } elseif (isZero($left) && !isZero($right)) {
                 return new LNumber(0);
+            } elseif (isZero($left) && isZero($right)) {
+                throw RuntimeException('Indeterminate expression 0**0.');
             } elseif (isUnity($left) || isZero($right)) {
                 return new LNumber(1);
+            } elseif (isInteger($left) && isInteger($right) &&
+                $right->value >= 0) {
+                return new LNumber(pow($left->value, $right->value));
             } elseif ($left instanceof Pow) {
                 $innerLeft = $left->left;
                 $innerRight = $left->right;
+                return new Pow($innerLeft, simplify(new Mul($innerRight, $right)));
+            } elseif ($left instanceof FuncCall &&
+                    $left->name instanceof Name &&
+                    $left->name->getFirst() === 'pow') {
+                $innerLeft = $left->args[0]->value;
+                $innerRight = $left->args[1]->value;
                 return new Pow($innerLeft, simplify(new Mul($innerRight, $right)));
             } else {
                 return new Pow($left, $right);
@@ -357,6 +421,37 @@ function simplify($inputExpr)
                 return clone $expr->expr;
             } else {
                 return $inputExpr;
+            }
+        case FuncCall::class:
+            switch ($name) {
+                case 'pow':
+                    if (!isset($arguments[1])) {
+                        throw RuntimeException('pow() function expects two parameters.');
+                    } elseif (!isZero($arguments[0]->value) && isZero($arguments[1]->value)) {
+                        return new LNumber(1);
+                    } elseif (isZero($arguments[0]->value) && !isZero($arguments[1]->value)) {
+                        return new LNumber(0);
+                    } elseif (isZero($arguments[0]->value) && isZero($arguments[1]->value)) {
+                        throw RuntimeException('Indeterminate expression 0**0.');
+                    } elseif (isUnity($arguments[1]->value)) {
+                        return clone $arguments[0]->value;
+                    } elseif (isInteger($base = $arguments[0]->value) &&
+                        isInteger($degree = $arguments[1]->value) &&
+                        $degree->value >= 0) {
+                        return new LNumber(pow($base->value, $degree->value));
+                    } elseif ($arguments[0]->value instanceof Pow) {
+                        $innerLeft = $arguments[0]->value->left;
+                        $innerRight = $arguments[0]->value->right;
+                        return new Pow($innerLeft, simplify(new Mul($innerRight, $arguments[1]->value)));
+                    } elseif ($arguments[0]->value instanceof FuncCall &&
+                        $arguments[0]->value->name instanceof Name &&
+                        $arguments[0]->value->name->getFirst() === 'pow') {
+                        $innerLeft = $arguments[0]->value->args[0]->value;
+                        $innerRight = $arguments[0]->value->args[1]->value;
+                        return new Pow($innerLeft, simplify(new Mul($innerRight, $arguments[1]->value)));
+                    } else {
+                        return new FuncCall(new Name('pow'), $arguments);
+                    }
             }
     }
 
