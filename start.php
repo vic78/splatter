@@ -27,7 +27,7 @@ use PhpParser\Node\Expr\UnaryPlus;
 
 $code = <<<'CODE'
 <?php
-pow(2 ** 2, 4) * $x;
+($z ** $k) ** $y  * $x;
 log($x ** 4) + exp(sin($x));
 
 CODE;
@@ -442,13 +442,13 @@ function simplify($inputExpr)
                     } elseif ($arguments[0]->value instanceof Pow) {
                         $innerLeft = $arguments[0]->value->left;
                         $innerRight = $arguments[0]->value->right;
-                        return new Pow($innerLeft, simplify(new Mul($innerRight, $arguments[1]->value)));
+                        return new FuncCall(new Name('pow'), [new Arg($innerLeft), new Arg(simplify(new Mul($innerRight, $arguments[1]->value)))]);
                     } elseif ($arguments[0]->value instanceof FuncCall &&
                         $arguments[0]->value->name instanceof Name &&
                         $arguments[0]->value->name->getFirst() === 'pow') {
                         $innerLeft = $arguments[0]->value->args[0]->value;
                         $innerRight = $arguments[0]->value->args[1]->value;
-                        return new Pow($innerLeft, simplify(new Mul($innerRight, $arguments[1]->value)));
+                        return new FuncCall(new Name('pow'), [new Arg($innerLeft), new Arg(simplify(new Mul($innerRight, $arguments[1]->value)))]);
                     } else {
                         return new FuncCall(new Name('pow'), $arguments);
                     }
